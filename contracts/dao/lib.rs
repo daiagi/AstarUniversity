@@ -14,8 +14,8 @@ pub mod dao {
         storage::Mapping,
     };
 
-     // look into this one. am i missing something?
-     
+    // look into this one. am i missing something?
+
     // use openbrush::contracts::traits::psp22::*;
     use scale::{
         Decode,
@@ -41,6 +41,7 @@ pub mod dao {
         VotePeriodExpired,
         AlreadyVoted,
         TransactionFailed,
+        NotEnoughBalance
     }
 
     #[derive(Encode, Decode)]
@@ -81,7 +82,6 @@ pub mod dao {
     type ProposalId = u128;
 
     const ONE_MINUTE: u64 = 60;
-
 
     #[ink(storage)]
     pub struct Governor {
@@ -167,9 +167,7 @@ pub mod dao {
             // Check the weight of the caller of the governance token (the proportion of
             // caller balance in relation to total supply)
 
-            let caller_balance = self.get_caller_balance(caller)?;
-            let total_supply = self.get_total_supply()?;
-            let caller_weight = caller_balance / total_supply;
+            let caller_weight = self.get_vote_weight(caller)?;
 
             // Add the caller weight to the proposal vote
             let mut proposal_vote = self.proposal_votes.get(&proposal_id).unwrap();
@@ -220,42 +218,39 @@ pub mod dao {
                 .returns::<Balance>()
                 .try_invoke();
 
-                match total_supply {
-                    Ok(Ok(total_supply)) => Ok(total_supply),
-                    _ => Err(GovernorError::TransactionFailed),
-                }
-
- 
-        }
-
-        fn transfer(&self, to: AccountId, amount: Balance) -> Result<(), GovernorError> {
-            build_call::<DefaultEnvironment>()
-                .call(self.governance_token)
-                .gas_limit(5_000_000_000)
-                .exec_input(
-                    ExecutionInput::new(Selector::new(ink::selector_bytes!(
-                        "PSP22::transfer"
-                    )))
-                    .push_arg(to)
-                    .push_arg(amount),
-                )
-                .returns::<()>()
-                .try_invoke()
-                .map_err(|_| GovernorError::TransactionFailed)?
-                .map_err(|_| GovernorError::TransactionFailed)?;
-
-            Ok(())
+            match total_supply {
+                Ok(Ok(total_supply)) => Ok(total_supply),
+                _ => Err(GovernorError::TransactionFailed),
+            }
         }
 
 
-        // to test
+        fn get_vote_weight(&self,account:AccountId)-> Result<Balance,GovernorError> {
+            let caller_balance = self.get_caller_balance(account)?;
+            let total_supply = self.get_total_supply()?;
+            Ok(caller_balance / total_supply)
+        }
+
+        #[ink(message, payable)]
+        pub fn transfer(
+            &mut self,
+            to: AccountId,
+            amount: Balance,
+        ) -> Result<(), GovernorError> {
+            if amount > self.env().balance() {
+                return Err(GovernorError::NotEnoughBalance)
+            }
+            match self.env().transfer(to, amount) {
+                Ok(_) => Ok(()),
+                Err(_err) => Err(GovernorError::TransactionFailed),
+            }
+        }
+
         #[ink(message)]
         pub fn get_proposal(&self, proposal_id: ProposalId) -> Option<Proposal> {
             self.proposals.get(&proposal_id)
         }
 
-
-        // to test
         #[ink(message)]
         pub fn next_proposal_id(&self) -> ProposalId {
             self.next_proposal_id
@@ -282,7 +277,8 @@ pub mod dao {
 
             let proposal_vote = self.proposal_votes.get(&proposal_id).unwrap();
 
-            let total_votes = (proposal_vote.for_votes + proposal_vote.against_votes) as u8;
+            let total_votes =
+                (proposal_vote.for_votes + proposal_vote.against_votes) as u8;
 
             if total_votes < self.quorum {
                 return Err(GovernorError::QuorumNotReached)
@@ -352,9 +348,51 @@ pub mod dao {
             assert_eq!(governor.next_proposal_id(), 0);
             assert_eq!(governor.propose(accounts.django, 100, 1), Ok(()));
             assert_eq!(governor.next_proposal_id(), 1);
-
         }
 
+        #[ink::test]
+        fn transfer_works() {
+            // 1. Create a new contract instance with a certain initial balance.
+            let mut governor = create_contract(1000);
+            let recipient = AccountId::from([0x02; 32]);
+            let amount = 100;
+
+            // 2. Check the initial balance of the recipient account.
+            let initial_recipient_balance = ink::env::test::get_account_balance::<
+                ink::env::DefaultEnvironment,
+            >(recipient)
+            .unwrap_or(0);
+        let initial_contract_balance = ink::env::test::get_account_balance::<
+                ink::env::DefaultEnvironment,
+            >(contract_id())
+            .unwrap_or(0);
+
+
+            // 3. Call `send_native_tokens` to send some amount to the recipient.
+            assert_eq!(governor.transfer(recipient, amount), Ok(()));
+
+            // 4. Verify that the recipient's balance increased by the expected amount
+            // and the contract's balance decreased by the same amount.
+            let final_recipient_balance = ink::env::test::get_account_balance::<
+                ink::env::DefaultEnvironment,
+            >(recipient)
+            .unwrap_or(0);
+        let final_contract_balance = ink::env::test::get_account_balance::<
+                ink::env::DefaultEnvironment,
+            >(contract_id())
+            .unwrap_or(0);
+
+
+            assert_eq!(final_recipient_balance, initial_recipient_balance + amount);
+            assert_eq!(final_contract_balance, initial_contract_balance - amount);
+
+            // test not enough balance
+            let result = governor.transfer(recipient, 1001);
+            assert_eq!(result, Err(GovernorError::NotEnoughBalance));
+
+
+
+        }
 
         #[ink::test]
         fn propose_works() {
