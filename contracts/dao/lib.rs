@@ -142,7 +142,7 @@ pub mod dao {
         ) -> Result<(), GovernorError> {
             let caller = self.env().caller();
 
-            // Ensure the proposal exist (or return DaoError::ProposalNotFound)
+            // Ensure the proposal exist (or return GovernorError::ProposalNotFound)
             let proposal = self
                 .proposals
                 .get(&proposal_id)
@@ -258,7 +258,7 @@ pub mod dao {
 
         #[ink(message)]
         pub fn execute(&mut self, proposal_id: ProposalId) -> Result<(), GovernorError> {
-            // Ensure the proposal exist (or return DaoError::ProposalNotFound)
+            // Ensure the proposal exist (or return GovernorError::ProposalNotFound)
 
             let proposal = self
                 .proposals
@@ -266,14 +266,14 @@ pub mod dao {
                 .ok_or(GovernorError::ProposalNotFound)?;
 
             // Ensure the proposal has not been already executed (or return
-            // DaoError::ProposalAlreadyExecuted)
+            // GovernorError::ProposalAlreadyExecuted)
 
             if proposal.executed {
                 return Err(GovernorError::ProposalAlreadyExecuted)
             }
 
             // Ensure the sum of For & Against vote reach quorum (or return
-            // DaoError::QuorumNotReached)
+            // GovernorError::QuorumNotReached)
 
             let proposal_vote = self.proposal_votes.get(&proposal_id).unwrap();
 
@@ -285,7 +285,7 @@ pub mod dao {
             }
 
             // Ensure there is more For votes than Against votes (or return
-            // DaoError::ProposalNotAccepted)
+            // GovernorError::ProposalNotAccepted)
 
             if proposal_vote.for_votes < proposal_vote.against_votes {
                 return Err(GovernorError::ProposalNotAccepted)
@@ -352,12 +352,10 @@ pub mod dao {
 
         #[ink::test]
         fn transfer_works() {
-            // 1. Create a new contract instance with a certain initial balance.
             let mut governor = create_contract(1000);
             let recipient = AccountId::from([0x02; 32]);
             let amount = 100;
 
-            // 2. Check the initial balance of the recipient account.
             let initial_recipient_balance = ink::env::test::get_account_balance::<
                 ink::env::DefaultEnvironment,
             >(recipient)
@@ -368,11 +366,8 @@ pub mod dao {
             .unwrap_or(0);
 
 
-            // 3. Call `send_native_tokens` to send some amount to the recipient.
             assert_eq!(governor.transfer(recipient, amount), Ok(()));
 
-            // 4. Verify that the recipient's balance increased by the expected amount
-            // and the contract's balance decreased by the same amount.
             let final_recipient_balance = ink::env::test::get_account_balance::<
                 ink::env::DefaultEnvironment,
             >(recipient)
